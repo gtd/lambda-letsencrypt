@@ -409,7 +409,7 @@ def elb_configure_cert(site, cert_id, cert_arn):
     load_balancers = elb.describe_load_balancers(
         Names=[site['ELB_NAME']],
     )
-    
+
     for lb in load_balancers['LoadBalancers']:
         if lb['LoadBalancerName'] != site['ELB_NAME']:
             continue
@@ -468,8 +468,8 @@ def elb_configure_cert(site, cert_id, cert_arn):
                 #     LoadBalancerPort=site['ELB_PORT'],
                 #     PolicyNames=['lambda-letsencrypt-default-ssl-policy']
                 # )
-            
-    
+
+
     return True
 
 
@@ -635,6 +635,8 @@ def lambda_handler(event, context):
         authzr = authorize_domain(user, domain)
         if authzr:
             my_domains.append(domain['DOMAIN'])
+        else:
+            raise RuntimeError("Domain authorization failed! authzr={}".format(authzr))
 
     for site in cfg.SITES:
         if 'skip' in site:
