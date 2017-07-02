@@ -170,10 +170,12 @@ def route53_challenge_verifier(domain, token, keyauth):
     # From https://github.com/brendanmckenzie/lambda-letsencrypt/commit/5f7b5b5ed4541f885a4ea090e30b4b82951b42a3
     # DNS propagation may make this somewhat time consuming.
     # try to resolve record '_acme-challenge.domain' and verify that the txt record value matches 'keyauth'
-    logger.info('Attempting to verify Route53 challenge')
+    logger.info("Attempting to verify Route53 challenge."
+                "DNS record propagation might sometimes be so slow that lambda timeouts (max is 5min)."
+                "In that case this will fail, but it will succeed next time.")
     count = 0
     record = '_acme-challenge.{}'.format(domain)
-    while count < 5:
+    while count < 100:
         try:
             records = dns.resolver.query(record, 'TXT')
             logger.info('records: {}'.format(records[0]))
