@@ -635,8 +635,6 @@ def lambda_handler(event, context):
         authzr = authorize_domain(user, domain)
         if authzr:
             my_domains.append(domain['DOMAIN'])
-        else:
-            raise RuntimeError("Domain authorization failed! authzr={}".format(authzr))
 
     for site in cfg.SITES:
         if 'skip' in site:
