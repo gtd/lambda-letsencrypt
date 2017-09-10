@@ -145,14 +145,16 @@ def http_challenge_verifier(domain, token, keyauth):
 
 
 def route53_challenge_solver(domain, token, keyauth, zoneid=None):
-    route53.change_resource_record_sets(
+    name = '_acme-challenge.{}'.format(domain)
+    logger.info("set route53 {} record to {}".format(name, keyauth))
+    response = route53.change_resource_record_sets(
         HostedZoneId=zoneid,
         ChangeBatch={
             'Comment': "Lamdba LetsEncrypt DNS Challenge Response",
             'Changes': [{
                 'Action': 'UPSERT',
                 'ResourceRecordSet': {
-                    'Name': '_acme-challenge.{}'.format(domain),
+                    'Name': name,
                     'Type': 'TXT',
                     'TTL': 300,
                     'ResourceRecords': [{
@@ -173,27 +175,30 @@ def route53_challenge_verifier(domain, token, keyauth):
     logger.info("Attempting to verify Route53 challenge."
                 "DNS record propagation might sometimes be so slow that lambda timeouts (max is 5min)."
                 "In that case this will fail, but it will succeed next time.")
-    count = 0
+
     record = '_acme-challenge.{}'.format(domain)
-    while count < 100:
-        try:
-            records = dns.resolver.query(record, 'TXT')
-            logger.info('records: {}'.format(records[0]))
-            return records[0].strings[0]
-        except:
-            logger.info('failed')
-            count += 1
-            sleep(5)
+    try:
+        records = dns.resolver.query(record, 'TXT')
+        current_keyauth = records[0].strings[0].strip()
+        logger.info('got txt record from dns: {}, excpected: {}'.format(current_keyauth, keyauth))
+        if (current_keyauth == keyauth):
+            logger.info('txt record is correct! Note that it is not guaranteed that letsencrypt also sees the record yet...')
+            return True
+        logger.info('dns txt record not yet propagated')
+        return False
+    except:
+        logger.info('dns txt get failed')
 
     return False
-
 
 def authorize_domain(user, domain):
     authzrfilename = 'authzr-{}.json'.format(domain)
     authzrfile = load_file(domain['DOMAIN'], authzrfilename)
     if authzrfile is not False:
+        logger.info('authz loaded file: {}'.format(authzrfile))
         authzr = AcmeAuthorization.unserialize(user, authzrfile)
     else:
+        logger.info('Failed to load file: {}'.format(authzrfilename))
         authzr = AcmeAuthorization(user=user, domain=domain['DOMAIN'])
     status = authzr.authorize()
 
@@ -209,7 +214,29 @@ def authorize_domain(user, domain):
     save_file(domain['DOMAIN'], authzrfilename, authzr.serialize())
     logger.debug(authzr.serialize())
 
-    # see if we're done
+
+    # see if we're done:
+    #
+    # Note:
+    # - It might take 3 lambda invocation runs before certs are generated:
+    #   Round 1: Authorisation challenge is created, will have status=pending.
+    #            Lamba function sets the challenge hash to route53 dns but will not see the value through dns (not propagated),
+    #            so will return False and challenge is leaved as ’pending’
+    #   Round 2: (maybe next day / after some hours or at least minutes, depending your scheduling).
+    #            The dns verifying function gets correct value (dns propagated).
+    #            Requests letsencrypt to verify the challenge. Status was 'pending' in this step.
+    #   Round 3: Letsencrypt has verified the challenge, so status='valid'. Certs will be finally are created!
+    #
+    # - Note: If round 2 is very soon (e.g. 0-15 minutes) it is possible that dns is still not propagated fully. So
+    #         lamda could see the new value and request verification from letsencrypt, which could be on the other side
+    #         of internet and not see yet the same dns record. In that case complete_challenges will fail, and next time status will be 'invalid'
+    #         and authzr.authorize() will set internal challenge url to null which will cause it to create new challenge
+    #         in the next round. Which might fail again for same reason.
+    #         So it is SAFER to have LONG ENOUGH interval between lambda invocations. Even once a day should be ok
+    #         since:
+    #           - challenges have 1 month expiration time (no hurry!)
+    #           - lambda starts to renew certs when they have 30 day still left
+    #           - So even if it would take 3 days from creating challenge to have new certs, it should be ok
     if status == 'pending':
         if 'http-01' in domain['VALIDATION_METHODS']:
             logger.info("Attempting challenge 'http-01'")

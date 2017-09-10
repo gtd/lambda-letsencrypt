@@ -264,23 +264,23 @@ class AcmeAuthorization:
         for challenge in challenges:
             token = challenge['token']
             key_authorization = "{}.{}".format(token, self.user.thumbprint)
-
+            hashed_keyauth = hashlib.sha256(key_authorization.encode("utf-8")).digest()
+            hashed_keyauth = base64.urlsafe_b64encode(hashed_keyauth).decode('utf8').replace("=", "")
             # DNS validation uses a different value for validation
-            if challenge_type == 'dns-01':
-                hashed_keyauth = hashlib.sha256(key_authorization.encode("utf-8")).digest()
-                hashed_keyauth = base64.urlsafe_b64encode(hashed_keyauth).decode('utf8').replace("=", "")
-                ret = func_challenge(self.domain, token, hashed_keyauth)
-            else:
-                ret = func_challenge(self.domain, token, key_authorization)
+            set_keyauth = hashed_keyauth if (challenge_type == 'dns-01') else key_authorization
+
+            ret = func_challenge(self.domain, token, set_keyauth)
 
             if not ret:
                 logger.debug("Challenge completion handler failed...")
                 continue
 
             # try to verify/validate it
-            ret = func_verifier(self.domain, token, key_authorization)
+            ret = func_verifier(self.domain, token, set_keyauth)
+
             if not ret:
-                logger.warn("Error checking validation for {}. Trying anyway.".format(self.domain))
+                logger.warn("Error checking validation for {}. If using dns, maybe not propagated yet. Try again later!".format(self.domain))
+                continue
 
             # tell letsencrypt we finished the challenge
             code, result, info = _send_signed_request(
