@@ -221,7 +221,7 @@ def authorize_domain(user, domain):
     # - It might take 3 lambda invocation runs before certs are generated:
     #   Round 1: Authorisation challenge is created, will have status=pending.
     #            Lamba function sets the challenge hash to route53 dns but will not see the value through dns (not propagated),
-    #            so will return False and challenge is leaved as ’pending’
+    #            so will return False and challenge is leaved as 'pending'
     #   Round 2: (maybe next day / after some hours or at least minutes, depending your scheduling).
     #            The dns verifying function gets correct value (dns propagated).
     #            Requests letsencrypt to verify the challenge. Status was 'pending' in this step.
